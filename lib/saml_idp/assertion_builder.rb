@@ -29,41 +29,41 @@ module SamlIdp
 
     def fresh
       builder = Builder::XmlMarkup.new
-      builder.Assertion xmlns: Saml::XML::Namespaces::ASSERTION,
+      builder.saml :Assertion, "xmlns:saml" => Saml::XML::Namespaces::ASSERTION,
         ID: reference_string,
         IssueInstant: now_iso,
         Version: "2.0" do |assertion|
-          assertion.Issuer issuer_uri
+          assertion.saml :Issuer, issuer_uri
           sign assertion
-          assertion.Subject do |subject|
-            subject.NameID name_id, Format: name_id_format[:name]
-            subject.SubjectConfirmation Method: Saml::XML::Namespaces::Methods::BEARER do |confirmation|
-              confirmation.SubjectConfirmationData "", InResponseTo: saml_request_id,
+          assertion.saml :Subject do |subject|
+            subject.saml :NameID, name_id, Format: name_id_format[:name]
+            subject.saml :SubjectConfirmation, Method: Saml::XML::Namespaces::Methods::BEARER do |confirmation|
+              confirmation.saml :SubjectConfirmationData, "", InResponseTo: saml_request_id,
                 NotOnOrAfter: not_on_or_after_subject,
                 Recipient: saml_acs_url
             end
           end
-          assertion.Conditions NotBefore: not_before, NotOnOrAfter: not_on_or_after_condition do |conditions|
-            conditions.AudienceRestriction do |restriction|
-              restriction.Audience audience_uri
+          assertion.saml :Conditions, NotBefore: not_before, NotOnOrAfter: not_on_or_after_condition do |conditions|
+            conditions.saml :AudienceRestriction do |restriction|
+              restriction.saml :Audience, audience_uri
             end
           end
-          assertion.AttributeStatement do |attr_statement|
+          assertion.saml :AttributeStatement do |attr_statement|
             config.attributes.each do |friendly_name, attrs|
               attrs = (attrs || {}).with_indifferent_access
-              attr_statement.Attribute Name: attrs[:name] || friendly_name,
+              attr_statement.saml :Attribute, Name: attrs[:name] || friendly_name,
                 NameFormat: attrs[:name_format] || Saml::XML::Namespaces::Formats::Attr::URI,
                 FriendlyName: friendly_name.to_s do |attr|
                   values = get_values_for friendly_name, attrs[:getter]
                   values.each do |val|
-                    attr.AttributeValue val.to_s
+                    attr.saml :AttributeValue, val.to_s
                   end
               end
             end
           end
-          assertion.AuthnStatement AuthnInstant: now_iso, SessionIndex: reference_string do |statement|
-            statement.AuthnContext do |context|
-              context.AuthnContextClassRef authn_context_classref
+          assertion.saml :AuthnStatement, AuthnInstant: now_iso, SessionIndex: reference_string do |statement|
+            statement.saml :AuthnContext do |context|
+              context.saml :AuthnContextClassRef, authn_context_classref
             end
           end
         end
