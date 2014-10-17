@@ -1,5 +1,7 @@
 .DS_Store
 .Gemfile
+.ruby-gemset
+.ruby-version
 /.bundle
 /.rvmrc
 /coverage
@@ -8,3 +10,4 @@
 /tags
 /Gemfile.lock
 clacks*.gem
+*.sw[opn]
