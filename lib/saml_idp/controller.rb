@@ -3,13 +3,14 @@ require 'base64'
 require 'time'
 require 'uuid'
 require 'saml_idp/request'
+require 'saml_idp/logout_response_builder'
 
 module SamlIdp
   module Controller
     extend ActiveSupport::Concern
 
     included do
-      helper_method :saml_acs_url if respond_to? :helper_method
+      helper_method :saml_response_url if respond_to? :helper_method
     end
 
     def initialize
@@ -32,10 +33,13 @@ module SamlIdp
         return
       end
       decode_request(raw_saml_request)
-      if SamlIdp.config.verify_authnrequest_sig
+
+      # TODO(awong): This block has an incorrect if conditional. It should be
+      # conditional on use of the redirect binding and there should be a selector
+      # for which message type a signature is required for.
+      if saml_request.authn_request.present? && SamlIdp.config.verify_authnrequest_sig
         raise "AuthnRequest signature verification enfored. Must have cert." if service_provider[:cert].nil?
 
-      binding.pry
         raw_params = request.query_string.split('&')
         saml_request_param = raw_params.select { |x| x =~ /^SAMLRequest=/ }[0]
         algorithm_param = raw_params.select { |x| x =~ /^SigAlg=/ }[0]
@@ -45,8 +49,6 @@ module SamlIdp
         # TODO(awong): Return SAML Error here. Don't raise.
         raise "Missing part of signature" unless !algorithm_param.nil? && !saml_request_param.nil? && !signature.nil?
 
-        # TODO(awong): Get the raw parameters here. This is silly to reconstruct and
-        # somewhat unsafe.
         if relay_state.nil?
           plain_string = "#{saml_request_param}&#{algorithm_param}"
         else
@@ -74,39 +76,26 @@ module SamlIdp
     end
 
     def decode_request(raw_saml_request)
-      self.saml_request = Request.from_deflated_request(raw_saml_request)
+      case request.request_method
+      when "POST"
+        self.saml_request = Request.new raw_saml_request
+      when "GET"
+        # SAML Requests via GET are using the redirect binding which defaltes and
+        # base64 encodes a SAML Request.
+        #
+        # See #3.4 of http://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf
+        self.saml_request = Request.from_deflated_request(raw_saml_request)
+      else
+        raise "Unknown binding #{request.request_method}"
+      end
     end
 
+    def response_doc(principal, opts = {})
+      build_response_doc(principal, opts)
+    end
+    
     def encode_response(principal, opts = {})
-      response_id, reference_id = get_saml_response_id, get_saml_reference_id
-      audience_uri = opts[:audience_uri] || saml_request.issuer || saml_acs_url[/^(.*?\/\/.*?\/)/, 1]
-      opt_issuer_uri = opts[:issuer_uri] || issuer_uri
-      authn_context_classref = opts[:authn_context_classref] || Saml::XML::Namespaces::AuthnContext::ClassRef::PASSWORD
-
-      encryption_opts = {}
-      if not service_provider[:block_encryption].nil?
-        encryption_opts = {
-          cert: service_provider[:cert],
-          block_encryption: service_provider[:block_encryption],
-          key_transport: service_provider[:key_transport],
-        }
-        raise "Invalid encryption config for #{saml_request.issuer}" if encryption_opts[:cert].nil? || encryption_opts[:block_encryption].nil? || encryption_opts[:key_transport].nil?
-      end
-
-      response_doc = SamlResponse.new(
-        reference_id,
-        response_id,
-        opt_issuer_uri,
-        principal,
-        audience_uri,
-        saml_request_id,
-        saml_acs_url,
-        signature_opts,
-        encryption_opts,
-        authn_context_classref
-      ).build
-
-      Base64.encode64(response_doc.to_xml)
+      Base64.encode64(response_doc(principal, opts).to_xml)
     end
 
     def relay_state
@@ -127,8 +116,8 @@ module SamlIdp
       saml_request.request_id
     end
 
-    def saml_acs_url
-      saml_request.acs_url
+    def saml_response_url
+      saml_request.response_url
     end
 
     def get_saml_response_id
@@ -141,6 +130,50 @@ module SamlIdp
 
     def service_provider
       SamlIdp.config.service_provider.finder.(saml_request.issuer)
+    end
+
+    def build_response_doc(principal, opts)
+      response_id = get_saml_response_id
+      opt_issuer_uri = opts[:issuer_uri] || issuer_uri
+
+      if saml_request.authn_request.present?
+        audience_uri = opts[:audience_uri] || saml_request.issuer || saml_response_url[/^(.*?\/\/.*?\/)/, 1]
+        reference_id = get_saml_reference_id
+        authn_context_classref = opts[:authn_context_classref] || Saml::XML::Namespaces::AuthnContext::ClassRef::PASSWORD
+
+        encryption_opts = {}
+        if not service_provider[:block_encryption].nil?
+          encryption_opts = {
+            cert: service_provider[:cert],
+            block_encryption: service_provider[:block_encryption],
+            key_transport: service_provider[:key_transport],
+          }
+          raise "Invalid encryption config for #{saml_request.issuer}" if encryption_opts[:cert].nil? || encryption_opts[:block_encryption].nil? || encryption_opts[:key_transport].nil?
+        end
+
+        SamlResponse.new(
+          reference_id,
+          response_id,
+          opt_issuer_uri,
+          principal,
+          audience_uri,
+          saml_request_id,
+          saml_response_url,
+          signature_opts,
+          encryption_opts,
+          authn_context_classref
+        ).build
+      elsif saml_request.logout_request.present?
+        SamlIdp::LogoutResponseBuilder.new(
+          response_id,
+          opt_issuer_uri,
+          saml_response_url,
+          saml_request_id,
+          signature_opts
+        ).build
+      else
+        raise "Unknown request #{saml_request}"
+      end
     end
   end
 end

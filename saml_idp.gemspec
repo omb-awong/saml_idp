@@ -27,18 +27,20 @@ Gem::Specification.new do |s|
   s.add_dependency('uuid')
   s.add_dependency('httparty')
   s.add_dependency('nokogiri')
-#  s.add_dependency('nokogiri-xmlsec')
+#  s.add_dependency('nokogiri-xmlsec-me-harder', "~> 0.9")
 
   s.add_development_dependency "rake"
   s.add_development_dependency "simplecov"
   s.add_development_dependency "rspec", "~> 3"
+#  s.add_development_dependency('nokogiri-xmlsec-me-harder', "~> 0.9")
 #  s.add_development_dependency "ruby-saml", "~> 0.8"
   s.add_development_dependency("rails", "~> 3.2")
   s.add_development_dependency("capybara")
   s.add_development_dependency("timecop")
   s.add_development_dependency("guard-bundler")
   s.add_development_dependency("guard-rspec")
-  s.add_development_dependency("pry-byebug")
+  s.add_development_dependency "pry-nav" if RUBY_VERSION < "2.0.0"
+  s.add_development_dependency "pry-byebug" if RUBY_VERSION >= "2.0.0"
   s.add_development_dependency("equivalent-xml")
 end
 
